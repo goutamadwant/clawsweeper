@@ -2371,6 +2371,7 @@ function worktreeContentSha256(cwd: string, deadlineAt: number) {
     .split("\0")
     .filter(Boolean);
   const paths = [...new Set([...tracked, ...untracked])].sort();
+  const worktreePaths = new Set(paths);
   for (const relativePath of paths) {
     assertValidationIdentityDeadline(deadlineAt, relativePath);
     const absolutePath = path.join(root, relativePath);
@@ -2387,7 +2388,14 @@ function worktreeContentSha256(cwd: string, deadlineAt: number) {
     updateIdentityHash(hash, "worktree-mode", String(stat.mode));
     if (stat.isSymbolicLink()) {
       updateIdentityHash(hash, "worktree-symlink", fs.readlinkSync(absolutePath));
-      updateSymlinkTargetDigest(hash, root, absolutePath, `${relativePath}\0target`, deadlineAt);
+      updateSymlinkTargetDigest(
+        hash,
+        root,
+        absolutePath,
+        `${relativePath}\0target`,
+        deadlineAt,
+        worktreePaths,
+      );
       continue;
     }
     if (stat.isFile()) {
@@ -3171,6 +3179,7 @@ function updateSymlinkTargetDigest(
   symlinkPath: string,
   logicalPath: string,
   deadlineAt: number,
+  worktreePaths: ReadonlySet<string>,
 ) {
   let targetPath: string;
   try {
@@ -3180,7 +3189,52 @@ function updateSymlinkTargetDigest(
   }
   assertPathWithin(root, targetPath, logicalPath);
   updateIdentityHash(hash, "symlink-target-path", path.relative(root, targetPath));
+  const workspaceReference = trackedWorkspaceSelfLink(root, symlinkPath, targetPath, worktreePaths);
+  if (workspaceReference) {
+    updateIdentityHash(hash, "symlink-workspace-reference", workspaceReference);
+    return;
+  }
   updateResolvedPathDigest(hash, root, targetPath, logicalPath, deadlineAt, new Set());
+}
+
+function trackedWorkspaceSelfLink(
+  root: string,
+  symlinkPath: string,
+  targetPath: string,
+  worktreePaths: ReadonlySet<string>,
+) {
+  if (!fs.statSync(targetPath).isDirectory()) return null;
+  const relativeLink = path.relative(root, symlinkPath);
+  const linkParts = relativeLink.split(path.sep);
+  const nodeModulesIndex = linkParts.lastIndexOf("node_modules");
+  const packageParts = linkParts.slice(nodeModulesIndex + 1);
+  const packageName =
+    nodeModulesIndex >= 0 && packageParts.length === 1
+      ? packageParts[0]
+      : nodeModulesIndex >= 0 && packageParts.length === 2 && packageParts[0]?.startsWith("@")
+        ? packageParts.join("/")
+        : null;
+  if (!packageName) return null;
+
+  const linkFromTarget = path.relative(targetPath, symlinkPath);
+  if (
+    !linkFromTarget ||
+    linkFromTarget.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(linkFromTarget)
+  ) {
+    return null;
+  }
+
+  const targetRelative = path.relative(root, targetPath).split(path.sep).join("/");
+  const manifestRelative = targetRelative ? `${targetRelative}/package.json` : "package.json";
+  if (!worktreePaths.has(manifestRelative)) return null;
+  try {
+    const manifest = JSON.parse(fs.readFileSync(path.join(targetPath, "package.json"), "utf8"));
+    if (manifest?.name !== packageName) return null;
+  } catch {
+    return null;
+  }
+  return `${packageName}\0${targetRelative}`;
 }
 
 function updateResolvedPathDigest(

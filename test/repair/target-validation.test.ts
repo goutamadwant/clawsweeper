@@ -4881,6 +4881,72 @@ test("Git identity probes reject target fsmonitor callbacks without executing th
 });
 
 test(
+  "validation accepts tracked node_modules workspace links back to the checkout",
+  { skip: process.platform === "win32" },
+  () => {
+    const cwd = gitPackageFixture({ check: 'node -e ""' });
+    const packagePath = path.join(cwd, "package.json");
+    const packageJson = JSON.parse(fs.readFileSync(packagePath, "utf8"));
+    packageJson.name = "openclaw";
+    fs.writeFileSync(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`);
+    fs.writeFileSync(path.join(cwd, "source.txt"), "initial\n");
+    const workspaceModules = path.join(cwd, "packages", "speech-core", "node_modules");
+    fs.mkdirSync(workspaceModules, { recursive: true });
+    fs.symlinkSync("../../..", path.join(workspaceModules, "openclaw"));
+    git(cwd, "add", "--force", ".");
+    git(cwd, "commit", "-m", "initial");
+
+    const first = captureTargetCheckoutBinding(cwd);
+    const second = captureTargetCheckoutBinding(cwd);
+
+    assert.deepEqual(second, first);
+    fs.writeFileSync(path.join(cwd, "source.txt"), "changed\n");
+    assert.throws(
+      () => assertTargetCheckoutBinding(cwd, first),
+      /target checkout changed after validation/,
+    );
+  },
+);
+
+test(
+  "validation rejects node_modules self-links with mismatched package identities",
+  { skip: process.platform === "win32" },
+  () => {
+    const cwd = gitPackageFixture({ check: 'node -e ""' });
+    const packagePath = path.join(cwd, "package.json");
+    const packageJson = JSON.parse(fs.readFileSync(packagePath, "utf8"));
+    packageJson.name = "openclaw";
+    fs.writeFileSync(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`);
+    const workspaceModules = path.join(cwd, "packages", "speech-core", "node_modules");
+    fs.mkdirSync(workspaceModules, { recursive: true });
+    fs.symlinkSync("../../..", path.join(workspaceModules, "not-openclaw"));
+    git(cwd, "add", "--force", ".");
+    git(cwd, "commit", "-m", "initial");
+
+    assert.throws(() => captureTargetCheckoutBinding(cwd), /validation identity directory cycle/);
+  },
+);
+
+test(
+  "validation rejects scoped self-links outside node_modules",
+  { skip: process.platform === "win32" },
+  () => {
+    const cwd = gitPackageFixture({ check: 'node -e ""' });
+    const packagePath = path.join(cwd, "package.json");
+    const packageJson = JSON.parse(fs.readFileSync(packagePath, "utf8"));
+    packageJson.name = "@openclaw/root";
+    fs.writeFileSync(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`);
+    const scopedPackage = path.join(cwd, "@openclaw");
+    fs.mkdirSync(scopedPackage, { recursive: true });
+    fs.symlinkSync("..", path.join(scopedPackage, "root"));
+    git(cwd, "add", "--force", ".");
+    git(cwd, "commit", "-m", "initial");
+
+    assert.throws(() => captureTargetCheckoutBinding(cwd), /validation identity directory cycle/);
+  },
+);
+
+test(
   "validation rejects tracked symlinks that escape the target checkout",
   { skip: process.platform === "win32" },
   () => {
