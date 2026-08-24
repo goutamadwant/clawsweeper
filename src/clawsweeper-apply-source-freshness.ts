@@ -306,7 +306,12 @@ export function createApplySourceFreshness(
     const reviewedAtMs = timestampMs(frontMatterValue(markdown, "reviewed_at"));
     return !contextHasNonAutomationActivityAfter(currentItemContext(), reviewedTimestampMs, {
       useCompleteActivityContext: true,
-      ...(reviewedAtMs === null ? {} : { ignoreTimelineCommentsThroughMs: reviewedAtMs }),
+      ...(reviewedAtMs === null
+        ? {}
+        : {
+            ignoreCommentsThroughMs: reviewedAtMs,
+            ignoreTimelineCommentsThroughMs: reviewedAtMs,
+          }),
     });
   };
 

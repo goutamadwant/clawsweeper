@@ -336,7 +336,7 @@ if (actual[0] === "api" && /\\/issues\\/321\\/comments(?:\\?|$)/.test(path) && !
   }
 });
 
-test("command-only timeline activity is ignored only through the completed review", () => {
+test("command-only comment activity is ignored only through the completed review", () => {
   const storedAtMs = Date.parse("2026-07-03T21:42:48Z");
   const reviewedAtMs = Date.parse("2026-07-03T21:44:48Z");
   const timelineEvent = (createdAt: string) => ({
@@ -344,6 +344,30 @@ test("command-only timeline activity is ignored only through the completed revie
     actor: "contributor",
     createdAt,
   });
+  const comment = (createdAt: string) => ({
+    author: "contributor",
+    createdAt,
+    updatedAt: createdAt,
+  });
+
+  for (const surface of ["comments", "pullReviewComments"] as const) {
+    assert.equal(
+      contextHasNonAutomationActivityAfterForTest({
+        [surface]: [comment("2026-07-03T21:43:00Z")],
+        activityAfterMs: storedAtMs,
+        ignoreCommentsThroughMs: reviewedAtMs,
+      }),
+      false,
+    );
+    assert.equal(
+      contextHasNonAutomationActivityAfterForTest({
+        [surface]: [comment("2026-07-03T21:45:00Z")],
+        activityAfterMs: storedAtMs,
+        ignoreCommentsThroughMs: reviewedAtMs,
+      }),
+      true,
+    );
+  }
 
   assert.equal(
     contextHasNonAutomationActivityAfterForTest({
@@ -2527,7 +2551,7 @@ if (args[0] === "api" && /\\/issues\\/74483$/.test(path)) {
   }
 });
 
-test("apply-decisions syncs fresh-head PR labels after a command-only re-review comment", () => {
+test("exact publication syncs fresh-head PR labels after a command-only re-review comment", () => {
   const root = mkdtempSync(tmpPrefix);
   try {
     const itemsDir = join(root, "items");
@@ -2536,6 +2560,11 @@ test("apply-decisions syncs fresh-head PR labels after a command-only re-review 
     const reportPath = join(root, "apply-report.json");
     const logPath = join(root, "gh.log");
     const itemPath = join(itemsDir, "74482.md");
+    const leaseUpdatedAt = new Date(Date.now() - 60_000).toISOString();
+    const leaseExpiresAt = new Date(Date.now() + 30 * 60_000).toISOString();
+    const leaseOwner = "exact-pr-74482";
+    const leaseCommentId = 1_987_482;
+    const headSha = "bc60b889bc60b889bc60b889bc60b889bc60b889";
     mkdirSync(itemsDir, { recursive: true });
     mkdirSync(plansDir, { recursive: true });
     const sourceReport = `${reportFrontMatter({
@@ -2556,7 +2585,9 @@ test("apply-decisions syncs fresh-head PR labels after a command-only re-review 
       item_snapshot_hash: "snapshot-a",
       item_updated_at: "2026-07-03T21:42:48Z",
       reviewed_at: "2026-07-03T21:44:48Z",
-      pull_head_sha: "bc60b889",
+      pull_head_sha: headSha,
+      review_lease_owner: leaseOwner,
+      review_lease_comment_id: String(leaseCommentId),
       merge_risk_labels: JSON.stringify(["merge-risk: 🚨 session-state"]),
     })}
 
@@ -2580,6 +2611,15 @@ Full review comments:
 `;
     const synced = reportWithSyncedReviewComment(sourceReport, 74482);
     writeFileSync(itemPath, synced.report, "utf8");
+    const leaseComment = renderReviewStartStatusComment({
+      number: 74482,
+      kind: "pull_request",
+      title: "Fresh head label restore after re-review",
+      headSha,
+      startedAt: leaseUpdatedAt,
+      leaseExpiresAt,
+      leaseOwner,
+    });
 
     const ghMock = `
 const { appendFileSync, readFileSync } = require("fs");
@@ -2603,15 +2643,23 @@ const comments = [
     created_at: "2026-07-03T21:42:28Z",
     updated_at: "2026-07-03T21:42:28Z"
   },
-  {
-    id: 987484,
+	  {
+	    id: 987484,
     html_url: "https://github.com/openclaw/openclaw/pull/74482#issuecomment-987484",
     body: "@clawsweeper re-review",
     user: { login: "contributor" },
     author_association: "CONTRIBUTOR",
     created_at: "2026-07-03T21:43:00Z",
-    updated_at: "2026-07-03T21:43:00Z"
-  },
+	    updated_at: "2026-07-03T21:43:00Z"
+	  },
+	  {
+	    id: ${leaseCommentId},
+	    html_url: "https://github.com/openclaw/openclaw/pull/74482#issuecomment-${leaseCommentId}",
+	    body: ${JSON.stringify(leaseComment)},
+	    user: { login: "clawsweeper[bot]" },
+	    created_at: ${JSON.stringify(leaseUpdatedAt)},
+	    updated_at: ${JSON.stringify(leaseUpdatedAt)}
+	  },
   ...Array.from({ length: 22 }, (_, index) => ({
     id: 987500 + index,
     html_url: "https://github.com/openclaw/openclaw/pull/74482#issuecomment-" + (987500 + index),
@@ -2660,14 +2708,20 @@ if (args[0] === "api" && /\\/issues\\/74482$/.test(path)) {
     changed_files: 1,
     commits: 2,
     review_comments: 0,
-    head: { sha: "bc60b889", ref: "branch", repo: { full_name: "fork/openclaw" } },
+    head: { sha: ${JSON.stringify(headSha)}, ref: "branch", repo: { full_name: "fork/openclaw" } },
     base: { sha: "base-sha", ref: "main", repo: { full_name: "openclaw/openclaw" } },
     user: { login: "contributor" }
   }));
 } else if (args[0] === "api" && /\\/pulls\\/74482\\/(files|commits|comments|reviews)(?:\\?|$)/.test(path)) {
   console.log(JSON.stringify([[]]));
+} else if (args[0] === "api" && path.includes("/commits/${headSha}/check-runs")) {
+  console.log(JSON.stringify({ total_count: 0, check_runs: [] }));
+} else if (args[0] === "api" && path.includes("/commits/${headSha}/status")) {
+  console.log(JSON.stringify({ state: "success", statuses: [] }));
 } else if (args[0] === "api" && /\\/issues\\/74482\\/comments(?:\\?|$)/.test(path)) {
   console.log(JSON.stringify(args.includes("--paginate") ? [comments] : comments));
+} else if (args[0] === "api" && path === "repos/openclaw/openclaw/issues/comments/${leaseCommentId}" && args.includes("DELETE")) {
+  console.log("");
 } else if (args[0] === "api" && /\\/issues\\/comments\\/987482$/.test(path)) {
   const input = args[args.indexOf("--input") + 1];
   appendFileSync(logPath, JSON.stringify(["patched-review-body", JSON.parse(readFileSync(input, "utf8")).body]) + "\\n");
@@ -2678,6 +2732,14 @@ if (args[0] === "api" && /\\/issues\\/74482$/.test(path)) {
   }));
 } else if (args[0] === "issue" && args[1] === "edit") {
   console.log("");
+} else if (args[0] === "label" && args[1] === "list") {
+  console.log(JSON.stringify([
+    { name: "status: 📣 needs proof", color: "FBCA04", description: "Needs real behavior proof." },
+    { name: "rating: 🦪 silver shellfish", color: "C5DEF5", description: "Silver review rating." },
+    { name: "proof: sufficient", color: "0E8A16", description: "Proof is sufficient." },
+    { name: "rating: 🦞 diamond lobster", color: "0E8A16", description: "Diamond review rating." },
+    { name: "merge-risk: 🚨 session-state", color: "D93F0B", description: "Session-state merge risk." }
+  ]));
 } else if (args[0] === "label" && args[1] === "create") {
   console.log(JSON.stringify({ name: args[2] }));
 } else {
@@ -2692,7 +2754,7 @@ if (args[0] === "api" && /\\/issues\\/74482$/.test(path)) {
         closedDir,
         plansDir,
         reportPath,
-        extraArgs: ["--sync-comments-only", "--item-numbers", "74482"],
+        extraArgs: ["--sync-comments-only", "--exact-event-publication", "--item-numbers", "74482"],
       });
     });
 
@@ -2705,51 +2767,28 @@ if (args[0] === "api" && /\\/issues\\/74482$/.test(path)) {
       .split("\n")
       .filter(Boolean)
       .map((line) => JSON.parse(line) as string[]);
-    assert(
-      calls.some(
-        (args) =>
-          args[0] === "issue" &&
-          args[1] === "edit" &&
-          args.includes("--add-label") &&
-          args.includes("rating: 🦞 diamond lobster"),
-      ),
-    );
-    assert(
-      calls.some(
-        (args) =>
-          args[0] === "issue" &&
-          args[1] === "edit" &&
-          args.includes("--remove-label") &&
-          args.includes("status: 📣 needs proof"),
-      ),
-    );
-    assert(
-      calls.some(
-        (args) =>
-          args[0] === "issue" &&
-          args[1] === "edit" &&
-          args.includes("--remove-label") &&
-          args.includes("rating: 🦪 silver shellfish"),
-      ),
-    );
-    assert(
-      calls.some(
-        (args) =>
-          args[0] === "issue" &&
-          args[1] === "edit" &&
-          args.includes("--add-label") &&
-          args.includes("proof: sufficient"),
-      ),
-    );
-    assert(
-      calls.some(
-        (args) =>
-          args[0] === "issue" &&
-          args[1] === "edit" &&
-          args.includes("--add-label") &&
-          args.includes("merge-risk: 🚨 session-state"),
-      ),
-    );
+    const hasIssueEditLabel = (flag: "--add-label" | "--remove-label", label: string) =>
+      calls.some((args) => {
+        if (args[0] !== "issue" || args[1] !== "edit") return false;
+        const flagIndex = args.indexOf(flag);
+        return flagIndex >= 0 && (args[flagIndex + 1] ?? "").split(",").includes(label);
+      });
+    if (process.env.CLAWSWEEPER_EXACT_LABEL_PROOF === "1") {
+      const mutation = calls.find((args) => args[0] === "issue" && args[1] === "edit");
+      process.stdout.write(
+        `${JSON.stringify({
+          proof: "exact review label reconciliation",
+          item: 74482,
+          mutation,
+          durableCommentPatched: calls.some((args) => args[0] === "patched-review-body"),
+        })}\n`,
+      );
+    }
+    assert.equal(hasIssueEditLabel("--add-label", "rating: 🦞 diamond lobster"), true);
+    assert.equal(hasIssueEditLabel("--remove-label", "status: 📣 needs proof"), true);
+    assert.equal(hasIssueEditLabel("--remove-label", "rating: 🦪 silver shellfish"), true);
+    assert.equal(hasIssueEditLabel("--add-label", "proof: sufficient"), true);
+    assert.equal(hasIssueEditLabel("--add-label", "merge-risk: 🚨 session-state"), true);
     const patchedBody = calls.find((args) => args[0] === "patched-review-body")?.[1] ?? "";
     assert.match(patchedBody, /Label justifications:/);
     assert.deepEqual(JSON.parse(readFileSync(reportPath, "utf8")), [
@@ -2889,6 +2928,10 @@ if (args[0] === "api" && /\\/issues\\/74483$/.test(path)) {
   }));
 } else if (args[0] === "api" && /\\/pulls\\/74483\\/(files|commits|comments|reviews)(?:\\?|$)/.test(path)) {
   console.log(JSON.stringify([[]]));
+} else if (args[0] === "api" && /\\/commits\\/bc60b889\\/check-runs(?:\\?|$)/.test(path)) {
+  console.log(JSON.stringify({ total_count: 0, check_runs: [] }));
+} else if (args[0] === "api" && /\\/commits\\/bc60b889\\/status(?:\\?|$)/.test(path)) {
+  console.log(JSON.stringify({ state: "success", statuses: [] }));
 } else if (args[0] === "api" && /\\/issues\\/74483\\/comments(?:\\?|$)/.test(path)) {
   console.log(JSON.stringify(args.includes("--paginate") ? [comments] : comments));
 } else if (args[0] === "api" && /\\/issues\\/comments\\/987484$/.test(path)) {
@@ -2939,7 +2982,7 @@ if (args[0] === "api" && /\\/issues\\/74483$/.test(path)) {
   }
 });
 
-test("apply-decisions withholds fresh-head PR label sync from close proposals", () => {
+test("exact publication withholds fresh-head PR label sync from close proposals", () => {
   const root = mkdtempSync(tmpPrefix);
   try {
     const itemsDir = join(root, "items");
@@ -2948,6 +2991,11 @@ test("apply-decisions withholds fresh-head PR label sync from close proposals", 
     const reportPath = join(root, "apply-report.json");
     const logPath = join(root, "gh.log");
     const itemPath = join(itemsDir, "74484.md");
+    const leaseUpdatedAt = new Date(Date.now() - 60_000).toISOString();
+    const leaseExpiresAt = new Date(Date.now() + 30 * 60_000).toISOString();
+    const leaseOwner = "exact-pr-74484";
+    const leaseCommentId = 1_987_484;
+    const headSha = "bc60b889bc60b889bc60b889bc60b889bc60b889";
     mkdirSync(itemsDir, { recursive: true });
     mkdirSync(plansDir, { recursive: true });
     const sourceReport = `${reportFrontMatter({
@@ -2968,7 +3016,9 @@ test("apply-decisions withholds fresh-head PR label sync from close proposals", 
       item_snapshot_hash: "snapshot-a",
       item_updated_at: "2026-07-03T21:42:48Z",
       reviewed_at: "2026-07-03T21:42:48Z",
-      pull_head_sha: "bc60b889",
+      pull_head_sha: headSha,
+      review_lease_owner: leaseOwner,
+      review_lease_comment_id: String(leaseCommentId),
     })}
 
 ## Summary
@@ -2999,6 +3049,15 @@ Closing this PR because the branch is not a useful landing base.
 `;
     const synced = reportWithSyncedReviewComment(sourceReport, 74484, "low_signal_unmergeable_pr");
     writeFileSync(itemPath, synced.report, "utf8");
+    const leaseComment = renderReviewStartStatusComment({
+      number: 74484,
+      kind: "pull_request",
+      title: "Fresh head close proposal",
+      headSha,
+      startedAt: leaseUpdatedAt,
+      leaseExpiresAt,
+      leaseOwner,
+    });
 
     const ghMock = `
 const { appendFileSync, readFileSync } = require("fs");
@@ -3038,7 +3097,7 @@ if (args[0] === "api" && /\\/issues\\/74484$/.test(path)) {
     review_comments: 0,
     requested_reviewers: [],
     requested_teams: [],
-    head: { sha: "bc60b889", ref: "branch", repo: { full_name: "fork/openclaw" } },
+    head: { sha: ${JSON.stringify(headSha)}, ref: "branch", repo: { full_name: "fork/openclaw" } },
     base: { sha: "base-sha", ref: "main", repo: { full_name: "openclaw/openclaw" } },
     user: { login: "contributor" }
   }));
@@ -3046,6 +3105,10 @@ if (args[0] === "api" && /\\/issues\\/74484$/.test(path)) {
   console.log(JSON.stringify([[]]));
 } else if (args[0] === "api" && /\\/pulls\\/74484\\/(files|commits|comments|reviews)(?:\\?|$)/.test(path)) {
   console.log(JSON.stringify([[]]));
+} else if (args[0] === "api" && path.includes("/commits/${headSha}/check-runs")) {
+  console.log(JSON.stringify({ total_count: 0, check_runs: [] }));
+} else if (args[0] === "api" && path.includes("/commits/${headSha}/status")) {
+  console.log(JSON.stringify({ state: "success", statuses: [] }));
 } else if (args[0] === "api" && /\\/issues\\/74484\\/comments(?:\\?|$)/.test(path)) {
   console.log(JSON.stringify([[
     {
@@ -3064,8 +3127,18 @@ if (args[0] === "api" && /\\/issues\\/74484$/.test(path)) {
       author_association: "CONTRIBUTOR",
       created_at: "2026-07-03T21:42:28Z",
       updated_at: "2026-07-03T21:42:28Z"
+    },
+    {
+      id: ${leaseCommentId},
+      html_url: "https://github.com/openclaw/openclaw/pull/74484#issuecomment-${leaseCommentId}",
+      body: ${JSON.stringify(leaseComment)},
+      user: { login: "clawsweeper[bot]" },
+      created_at: ${JSON.stringify(leaseUpdatedAt)},
+      updated_at: ${JSON.stringify(leaseUpdatedAt)}
     }
   ]]));
+} else if (args[0] === "api" && path === "repos/openclaw/openclaw/issues/comments/${leaseCommentId}" && args.includes("DELETE")) {
+  console.log("");
 } else if (args[0] === "api" && /\\/issues\\/comments\\/987486$/.test(path)) {
   const input = args[args.indexOf("--input") + 1];
   appendFileSync(logPath, JSON.stringify(["patched-review-body", JSON.parse(readFileSync(input, "utf8")).body]) + "\\n");
@@ -3090,7 +3163,7 @@ if (args[0] === "api" && /\\/issues\\/74484$/.test(path)) {
         closedDir,
         plansDir,
         reportPath,
-        extraArgs: ["--sync-comments-only", "--item-numbers", "74484"],
+        extraArgs: ["--sync-comments-only", "--exact-event-publication", "--item-numbers", "74484"],
       });
     });
 
