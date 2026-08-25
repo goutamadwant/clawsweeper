@@ -289,12 +289,20 @@ export function createApplySourceFreshness(
   const labelSyncFreshEnough = (): boolean => {
     const { isCloseProposal, markdown, storedUpdatedAt } = currentState();
     if (!storedUpdatedAt) return false;
-    if (!updatedSinceReview || automationOnlyUpdate) return true;
     const completeFreshHeadReview =
       !isCloseProposal &&
       item.kind === "pull_request" &&
       frontMatterValue(markdown, "review_status") === "complete" &&
       freshPullRequestReviewHead(markdown, currentItemContext());
+    if (completeFreshHeadReview && reviewHasCompleteActivityIdentity) {
+      if (!completeReviewActivityReceiptMatches(currentItemContext())) return false;
+      const reviewedAtMs = timestampMs(frontMatterValue(markdown, "reviewed_at"));
+      if (reviewedAtMs === null) return false;
+      return !contextHasNonAutomationActivityAfter(currentItemContext(), reviewedAtMs - 1, {
+        useCompleteActivityContext: true,
+      });
+    }
+    if (!updatedSinceReview || automationOnlyUpdate) return true;
     if (!completeFreshHeadReview) {
       const latestAutomationMs = timestampMs(latestAutomationUpdatedAt);
       const itemUpdatedAtMs = timestampMs(item.updatedAt);
@@ -309,7 +317,6 @@ export function createApplySourceFreshness(
       ...(reviewedAtMs === null
         ? {}
         : {
-            ignoreCommentsThroughMs: reviewedAtMs,
             ignoreTimelineCommentsThroughMs: reviewedAtMs,
           }),
     });

@@ -147,7 +147,6 @@ export interface CreateApplyDecisionWorkflowDependencies {
     options?: {
       truncationCountsAsActivity?: boolean;
       useCompleteActivityContext?: boolean;
-      ignoreCommentsThroughMs?: number;
       ignoreTimelineCommentsThroughMs?: number;
       ignoreTrustedTimelineComment?: { authors: ReadonlySet<string>; createdAt: string };
     },

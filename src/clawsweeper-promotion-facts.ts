@@ -288,7 +288,6 @@ export function createPullRequestPromotionFacts(
     options: {
       truncationCountsAsActivity?: boolean;
       useCompleteActivityContext?: boolean;
-      ignoreCommentsThroughMs?: number;
       ignoreTimelineCommentsThroughMs?: number;
       ignoreTrustedTimelineComment?: {
         authors: ReadonlySet<string>;
@@ -310,10 +309,6 @@ export function createPullRequestPromotionFacts(
     }
     const hasNonAutomationComment = (comment: unknown): boolean => {
       const record = asRecord(comment);
-      if (options.ignoreCommentsThroughMs !== undefined) {
-        const commentMs = eventTimestampMs(comment);
-        if (commentMs !== null && commentMs <= options.ignoreCommentsThroughMs) return false;
-      }
       return (
         isAfterReview(comment, reviewedAtMs) &&
         !isAutomationReportAuthor(stringOrUndefined(record.author))
@@ -366,7 +361,6 @@ export function createPullRequestPromotionFacts(
     };
     completeActivityContext?: Partial<CompleteActivityContext>;
     activityAfterMs: number;
-    ignoreCommentsThroughMs?: number;
     ignoreTimelineCommentsThroughMs?: number;
   }): boolean {
     const context: ItemContext = {
@@ -391,9 +385,6 @@ export function createPullRequestPromotionFacts(
     }
     return contextHasNonAutomationActivityAfter(context, options.activityAfterMs, {
       ...(options.completeActivityContext ? { useCompleteActivityContext: true } : {}),
-      ...(options.ignoreCommentsThroughMs === undefined
-        ? {}
-        : { ignoreCommentsThroughMs: options.ignoreCommentsThroughMs }),
       ...(options.ignoreTimelineCommentsThroughMs === undefined
         ? {}
         : { ignoreTimelineCommentsThroughMs: options.ignoreTimelineCommentsThroughMs }),

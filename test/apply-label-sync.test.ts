@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -336,7 +337,7 @@ if (actual[0] === "api" && /\\/issues\\/321\\/comments(?:\\?|$)/.test(path) && !
   }
 });
 
-test("command-only comment activity is ignored only through the completed review", () => {
+test("human comment activity remains blocking without a matching review receipt", () => {
   const storedAtMs = Date.parse("2026-07-03T21:42:48Z");
   const reviewedAtMs = Date.parse("2026-07-03T21:44:48Z");
   const timelineEvent = (createdAt: string) => ({
@@ -355,15 +356,6 @@ test("command-only comment activity is ignored only through the completed review
       contextHasNonAutomationActivityAfterForTest({
         [surface]: [comment("2026-07-03T21:43:00Z")],
         activityAfterMs: storedAtMs,
-        ignoreCommentsThroughMs: reviewedAtMs,
-      }),
-      false,
-    );
-    assert.equal(
-      contextHasNonAutomationActivityAfterForTest({
-        [surface]: [comment("2026-07-03T21:45:00Z")],
-        activityAfterMs: storedAtMs,
-        ignoreCommentsThroughMs: reviewedAtMs,
       }),
       true,
     );
@@ -2565,6 +2557,27 @@ test("exact publication syncs fresh-head PR labels after a command-only re-revie
     const leaseOwner = "exact-pr-74482";
     const leaseCommentId = 1_987_482;
     const headSha = "bc60b889bc60b889bc60b889bc60b889bc60b889";
+    const emptyActivityDigest = createHash("sha256").update("[]").digest("hex");
+    const sourceRevision = itemSourceRevisionSha256ForTest(
+      {
+        title: "Fresh head label restore after re-review",
+        labels: ["status: 📣 needs proof", "rating: 🦪 silver shellfish"],
+      },
+      [
+        {
+          id: 987483,
+          body: "Pushed a new head, please take another look.",
+          user: { login: "contributor" },
+          updated_at: "2026-07-03T21:42:28Z",
+        },
+        {
+          id: 987484,
+          body: "@clawsweeper re-review",
+          user: { login: "contributor" },
+          updated_at: "2026-07-03T21:43:00Z",
+        },
+      ],
+    );
     mkdirSync(itemsDir, { recursive: true });
     mkdirSync(plansDir, { recursive: true });
     const sourceReport = `${reportFrontMatter({
@@ -2585,6 +2598,9 @@ test("exact publication syncs fresh-head PR labels after a command-only re-revie
       item_snapshot_hash: "snapshot-a",
       item_updated_at: "2026-07-03T21:42:48Z",
       reviewed_at: "2026-07-03T21:44:48Z",
+      item_source_revision: sourceRevision,
+      review_timeline_revision: emptyActivityDigest,
+      review_activity_cursor: `v1:0:${emptyActivityDigest}`,
       pull_head_sha: headSha,
       review_lease_owner: leaseOwner,
       review_lease_comment_id: String(leaseCommentId),
@@ -2664,7 +2680,7 @@ const comments = [
     id: 987500 + index,
     html_url: "https://github.com/openclaw/openclaw/pull/74482#issuecomment-" + (987500 + index),
     body: "automation update " + (index + 1),
-    user: { login: "fixture[bot]" },
+    user: { login: "clawsweeper[bot]" },
     created_at: "2026-07-03T21:45:00Z",
     updated_at: "2026-07-03T21:45:00Z"
   }))
@@ -2673,12 +2689,7 @@ const rawArgs = process.argv.slice(2);
 const args = rawArgs[0] === "--repo" ? rawArgs.slice(2) : rawArgs;
 appendFileSync(logPath, JSON.stringify(args) + "\\n");
 const path = args[1] || "";
-const reReviewTimeline = [{
-  id: 987483,
-  event: "commented",
-  actor: { login: "contributor" },
-  created_at: "2026-07-03T21:43:00Z"
-}];
+const reReviewTimeline = [];
 if (args[0] === "api" && /\\/issues\\/74482$/.test(path)) {
   console.log(JSON.stringify({
     number: 74482,
@@ -2812,6 +2823,12 @@ test("apply-decisions skips fresh-head PR label sync when humans act after the r
     const reportPath = join(root, "apply-report.json");
     const logPath = join(root, "gh.log");
     const itemPath = join(itemsDir, "74483.md");
+    const headSha = "bc60b889bc60b889bc60b889bc60b889bc60b889";
+    const emptyActivityDigest = createHash("sha256").update("[]").digest("hex");
+    const sourceRevision = itemSourceRevisionSha256ForTest(
+      { title: "Fresh head with human activity", labels: [] },
+      [],
+    );
     mkdirSync(itemsDir, { recursive: true });
     mkdirSync(plansDir, { recursive: true });
     const sourceReport = `${reportFrontMatter({
@@ -2832,7 +2849,10 @@ test("apply-decisions skips fresh-head PR label sync when humans act after the r
       item_snapshot_hash: "snapshot-a",
       item_updated_at: "2026-07-03T21:42:48Z",
       reviewed_at: "2026-07-03T21:42:48Z",
-      pull_head_sha: "bc60b889",
+      item_source_revision: sourceRevision,
+      review_timeline_revision: emptyActivityDigest,
+      review_activity_cursor: `v1:0:${emptyActivityDigest}`,
+      pull_head_sha: headSha,
     })}
 
 ## Summary
@@ -2864,7 +2884,7 @@ const automationComments = Array.from({ length: 23 }, (_, index) => ({
   id: 987500 + index,
   html_url: "https://github.com/openclaw/openclaw/pull/74483#issuecomment-" + (987500 + index),
   body: "automation update " + (index + 1),
-  user: { login: "fixture[bot]" },
+  user: { login: "clawsweeper[bot]" },
   created_at: "2026-07-03T21:45:00Z",
   updated_at: "2026-07-03T21:45:00Z"
 }));
@@ -2878,15 +2898,6 @@ const comments = [
     updated_at: "2026-07-03T21:33:21Z"
   },
   ...automationComments.slice(0, 11),
-  {
-    id: 987485,
-    html_url: "https://github.com/openclaw/openclaw/pull/74483#issuecomment-987485",
-    body: "I already relabeled this myself, leave the labels alone.",
-    user: { login: "maintainer" },
-    author_association: "MEMBER",
-    created_at: "2026-07-03T21:44:00Z",
-    updated_at: "2026-07-03T21:44:00Z"
-  },
   ...automationComments.slice(11)
 ];
 const rawArgs = process.argv.slice(2);
@@ -2899,7 +2910,7 @@ if (args[0] === "api" && /\\/issues\\/74483$/.test(path)) {
     title: "Fresh head with human activity",
     html_url: "https://github.com/openclaw/openclaw/pull/74483",
     created_at: "2026-07-03T19:00:00Z",
-    updated_at: "2026-07-03T21:43:45Z",
+    updated_at: "2026-07-03T21:42:48Z",
     closed_at: null,
     state: "open",
     locked: false,
@@ -2907,13 +2918,25 @@ if (args[0] === "api" && /\\/issues\\/74483$/.test(path)) {
     author_association: "CONTRIBUTOR",
     user: { login: "contributor" },
     comments: comments.length,
-    labels: [],
+    labels: ["status: 📣 needs proof"],
     pull_request: {}
   }));
 } else if (args[0] === "api" && args[1] === "-i" && /\\/issues\\/74483\\/timeline(?:\\?|$)/.test(args[2] || "")) {
-  console.log("HTTP/2 200\\n\\n[]");
+  console.log("HTTP/2 200\\n\\n" + JSON.stringify([{
+    id: 987485,
+    event: "labeled",
+    actor: { login: "maintainer" },
+    label: { name: "status: 📣 needs proof" },
+    created_at: "2026-07-03T21:42:48Z"
+  }]));
 } else if (args[0] === "api" && /\\/issues\\/74483\\/timeline(?:\\?|$)/.test(path)) {
-  console.log(JSON.stringify([[]]));
+  console.log(JSON.stringify([[{
+    id: 987485,
+    event: "labeled",
+    actor: { login: "maintainer" },
+    label: { name: "status: 📣 needs proof" },
+    created_at: "2026-07-03T21:42:48Z"
+  }]]));
 } else if (args[0] === "api" && /\\/pulls\\/74483$/.test(path)) {
   console.log(JSON.stringify({
     number: 74483,
@@ -2922,15 +2945,15 @@ if (args[0] === "api" && /\\/issues\\/74483$/.test(path)) {
     changed_files: 1,
     commits: 2,
     review_comments: 0,
-    head: { sha: "bc60b889", ref: "branch", repo: { full_name: "fork/openclaw" } },
+    head: { sha: ${JSON.stringify(headSha)}, ref: "branch", repo: { full_name: "fork/openclaw" } },
     base: { sha: "base-sha", ref: "main", repo: { full_name: "openclaw/openclaw" } },
     user: { login: "contributor" }
   }));
 } else if (args[0] === "api" && /\\/pulls\\/74483\\/(files|commits|comments|reviews)(?:\\?|$)/.test(path)) {
   console.log(JSON.stringify([[]]));
-} else if (args[0] === "api" && /\\/commits\\/bc60b889\\/check-runs(?:\\?|$)/.test(path)) {
+} else if (args[0] === "api" && path.includes("/commits/${headSha}/check-runs")) {
   console.log(JSON.stringify({ total_count: 0, check_runs: [] }));
-} else if (args[0] === "api" && /\\/commits\\/bc60b889\\/status(?:\\?|$)/.test(path)) {
+} else if (args[0] === "api" && path.includes("/commits/${headSha}/status")) {
   console.log(JSON.stringify({ state: "success", statuses: [] }));
 } else if (args[0] === "api" && /\\/issues\\/74483\\/comments(?:\\?|$)/.test(path)) {
   console.log(JSON.stringify(args.includes("--paginate") ? [comments] : comments));
