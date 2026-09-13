@@ -267,7 +267,7 @@ export function createReportOrchestrationFoundation(
     if (!dataModelSurfaceChangeFromReport(markdown)) return false;
     return hasDataModelUpgradeProof(
       [
-        reviewSectionValue(markdown, "realBehaviorProof"),
+        reportRealBehaviorProofPolicy(markdown).assessment.summary,
         reviewSectionValue(markdown, "solutionAssessment"),
         reviewSectionValue(markdown, "evidence"),
       ].join("\n"),
