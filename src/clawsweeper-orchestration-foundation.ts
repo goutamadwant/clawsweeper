@@ -266,10 +266,14 @@ export function createReportOrchestrationFoundation(
 
   function dataModelUpgradeProofFromReport(markdown: string): boolean {
     if (!dataModelSurfaceChangeFromReport(markdown)) return false;
-    const proofSummary = sectionLineValue(
-      reviewSectionValue(markdown, "realBehaviorProof"),
-      "Summary",
-    );
+    const proofSection = reviewSectionValue(markdown, "realBehaviorProof");
+    const proofStatus =
+      frontMatterValue(markdown, "real_behavior_proof_status") ??
+      sectionLineValue(proofSection, "Status");
+    const proofSummary =
+      proofStatus === "sufficient"
+        ? sectionLineValue(proofSection, "Summary")
+        : undefined;
     return hasDataModelUpgradeProof(
       [
         proofSummary,

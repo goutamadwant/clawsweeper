@@ -2075,7 +2075,11 @@ Full review comments:
 });
 
 test("data model proof reads its recorded summary with and without an override", () => {
-  for (const labels of [["clawsweeper:automerge"], ["clawsweeper:automerge", "proof: override"]]) {
+  for (const [labels, proofStatus, proofStatusLine] of [
+    [["clawsweeper:automerge"], undefined, "Status: sufficient"],
+    [["clawsweeper:automerge", "proof: override"], undefined, "Status: sufficient"],
+    [["clawsweeper:automerge", "proof: override"], "sufficient", ""],
+  ] as const) {
     const report = `${reportFrontMatter({
       repository: "openclaw/openclaw",
       type: "pull_request",
@@ -2087,6 +2091,7 @@ test("data model proof reads its recorded summary with and without an override",
       labels: JSON.stringify(labels),
       work_candidate: "none",
       pull_head_sha: "abc123def456abc123def456abc123def456abcd",
+      ...(proofStatus ? { real_behavior_proof_status: proofStatus } : {}),
       data_model_change: "true",
       data_model_surfaces: JSON.stringify(["database schema: packages/database/schema.ts"]),
     })}
@@ -2101,7 +2106,7 @@ Adds a stored database column.
 
 ## Real Behavior Proof
 
-Status: sufficient
+${proofStatusLine}
 
 Evidence kind: terminal
 
@@ -2141,6 +2146,7 @@ test("proof override alone does not satisfy the data model compatibility gate", 
     labels: JSON.stringify(["clawsweeper:automerge", "proof: override"]),
     work_candidate: "none",
     pull_head_sha: "abc123def456abc123def456abc123def456abcd",
+    real_behavior_proof_status: "missing",
     data_model_change: "true",
     data_model_surfaces: JSON.stringify(["database schema: packages/database/schema.ts"]),
   })}
@@ -2161,7 +2167,7 @@ Evidence kind: none
 
 Needs contributor action: false
 
-Summary: A maintainer approved proceeding without runtime proof.
+Summary: Upgrade compatibility is verified against an existing database.
 
 ## Review Findings
 
