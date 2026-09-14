@@ -45,6 +45,7 @@ export function createReportOrchestrationFoundation(
     reportRealBehaviorProofPolicy,
     reportSecurityReview,
     reviewSectionValue,
+    sectionLineValue,
     sentence,
     targetProfile,
     targetRepo,
@@ -265,9 +266,13 @@ export function createReportOrchestrationFoundation(
 
   function dataModelUpgradeProofFromReport(markdown: string): boolean {
     if (!dataModelSurfaceChangeFromReport(markdown)) return false;
+    const proofSummary = sectionLineValue(
+      reviewSectionValue(markdown, "realBehaviorProof"),
+      "Summary",
+    );
     return hasDataModelUpgradeProof(
       [
-        reportRealBehaviorProofPolicy(markdown).assessment.summary,
+        proofSummary,
         reviewSectionValue(markdown, "solutionAssessment"),
         reviewSectionValue(markdown, "evidence"),
       ].join("\n"),
