@@ -271,9 +271,7 @@ export function createReportOrchestrationFoundation(
       frontMatterValue(markdown, "real_behavior_proof_status") ??
       sectionLineValue(proofSection, "Status");
     const proofSummary =
-      proofStatus === "sufficient"
-        ? sectionLineValue(proofSection, "Summary")
-        : undefined;
+      proofStatus === "sufficient" ? sectionLineValue(proofSection, "Summary") : undefined;
     return hasDataModelUpgradeProof(
       [
         proofSummary,
