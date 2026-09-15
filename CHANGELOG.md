@@ -7,6 +7,8 @@ checkpoint, and status-only commits are intentionally omitted.
 
 ## 0.3.1 - Unreleased
 
+- Accept sufficient recorded upgrade proof without treating serialized contributor-action metadata as a compatibility blocker; preserve missing-proof and override safeguards. Thanks @roboclaw-bot for the report and @goutamadwant for the fix.
+
 - Keep repair-result publication within its job budget by hydrating only the operational Git state it consumes, without loading unrelated canonical review records.
 
 - Wait for the exact-review queue to become available before declaring a dashboard deployment ready, while retaining the deployment deadline and all smoke checks.
